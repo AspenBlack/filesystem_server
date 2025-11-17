@@ -256,6 +256,16 @@ def init(directory: str, file_path: str ) -> Dict[str, Any]:
         - details: Additional information about directory accessibility
         - directory_contents: Optional list of directory contents if directory parameter provided
         - file_content: Optional file content if file_path parameter provided
+    
+    Example:
+        # Verify configuration only
+        init(directory=None, file_path=None)
+        
+        # Verify config and list a directory
+        init(directory="D:/projects", file_path=None)
+        
+        # Verify config, list directory, and read a file
+        init(directory="D:/projects", file_path="D:/projects/readme.md")
     """
     # Start with the standard init validation
     if not allowed_dirs:
@@ -408,6 +418,16 @@ def list_directory(directory: str, report_progress: bool = True, batch_size: int
             - processing_time: Time taken to process the directory
         
         If an error occurs, returns a dictionary with "error" and "error_message" keys.
+    
+    Example:
+        # List with progress reporting
+        list_directory(directory="D:/projects", report_progress=True, batch_size=100)
+        
+        # Simple list without progress
+        list_directory(directory="D:/projects", report_progress=False)
+        
+        # Windows path format also works
+        list_directory(directory="D:\\projects\\myapp")
     """
     start_time = time.time()
     
@@ -541,6 +561,129 @@ def list_directory(directory: str, report_progress: bool = True, batch_size: int
         return ["error", error_message]
 
 @mcp.tool()
+def list_directory_index(directory: str, index: int = 0, index_size: int = 10) -> Dict[str, Any]:
+    """
+    List a paginated subset of files and subdirectories in the given directory.
+    
+    Args:
+        directory: The absolute or relative path to the directory (supports both / and \\ separators).
+        index: The page index (0-based). Determines which page of results to return.
+        index_size: The number of items per page (default: 10).
+    
+    Returns:
+        A dictionary containing:
+            - contents: List of file and directory names for the requested page
+            - total_items: Total number of items in the directory
+            - index: Current page index
+            - index_size: Number of items per page
+            - start_position: Starting position in the full list (index * index_size)
+            - end_position: Ending position in the full list
+            - total_pages: Total number of pages available
+            - has_more: Boolean indicating if there are more pages
+            - directory_path: Original directory path
+            - normalized_path: Normalized directory path
+        
+        If an error occurs, returns a dictionary with "error" and "error_message" keys.
+    
+    Example:
+        # Get first page (items 0-9)
+        list_directory_index(directory="D:/projects", index=0, index_size=10)
+        
+        # Get second page (items 10-19)
+        list_directory_index(directory="D:/projects", index=1, index_size=10)
+        
+        # Get larger page size
+        list_directory_index(directory="D:/projects", index=0, index_size=50)
+    """
+    start_time = time.time()
+    
+    try:
+        # Normalize the path to handle both Windows and Unix style separators
+        normalized_dir = normalize_path(directory)
+    
+        # Use the normalized path for the allowed path check
+        if not is_allowed_path(normalized_dir):
+            return {
+                "error": True,
+                "error_message": f"Access to this directory is not allowed. Requested: {directory}, Normalized: {normalized_dir}"
+            }
+    
+        if not os.path.isdir(normalized_dir):
+            return {
+                "error": True,
+                "error_message": f"The provided path is not a directory or does not exist: Requested: {directory}, Normalized: {normalized_dir}"
+            }
+    
+        # List all directory contents
+        try:
+            directory_contents = os.listdir(normalized_dir)
+            total_items = len(directory_contents)
+            
+            # Calculate pagination
+            start_position = index * index_size
+            end_position = min(start_position + index_size, total_items)
+            total_pages = (total_items + index_size - 1) // index_size  # Ceiling division
+            
+            # Check if index is valid
+            if start_position >= total_items and total_items > 0:
+                return {
+                    "error": True,
+                    "error_message": f"Index {index} is out of range. Total items: {total_items}, Total pages: {total_pages}",
+                    "total_items": total_items,
+                    "total_pages": total_pages,
+                    "index_size": index_size
+                }
+            
+            # Extract the requested page
+            page_contents = directory_contents[start_position:end_position]
+            
+            end_time = time.time()
+            processing_time = round(end_time - start_time, 3)
+            
+            return {
+                "error": False,
+                "contents": page_contents,
+                "total_items": total_items,
+                "index": index,
+                "index_size": index_size,
+                "start_position": start_position,
+                "end_position": end_position,
+                "items_in_page": len(page_contents),
+                "total_pages": total_pages,
+                "has_more": end_position < total_items,
+                "has_previous": index > 0,
+                "processing_time": processing_time,
+                "directory_path": directory,
+                "normalized_path": normalized_dir
+            }
+                    
+        except PermissionError:
+            return {
+                "error": True,
+                "error_message": f"Permission denied accessing directory: {directory}, Normalized: {normalized_dir}"
+            }
+        except FileNotFoundError:
+            return {
+                "error": True,
+                "error_message": f"Directory not found: {directory}, Normalized: {normalized_dir}"
+            }
+        except OSError as e:
+            return {
+                "error": True,
+                "error_message": f"OS error accessing directory {directory}: {str(e)}, Normalized: {normalized_dir}"
+            }
+        except Exception as e:
+            return {
+                "error": True,
+                "error_message": f"Error accessing directory {directory}: {str(e)}, Normalized: {normalized_dir}"
+            }
+    except Exception as e:
+        return {
+            "error": True,
+            "error_message": f"Unexpected error accessing directory {directory}: {str(e)}"
+        }
+
+@mcp.tool()
 def read_file(file_path: str) -> str:
     """
     Read the content of a file.
@@ -553,6 +696,16 @@ def read_file(file_path: str) -> str:
     
     Raises:
         ValueError: If the file is not allowed, does not exist, or has a disallowed extension.
+    
+    Example:
+        # Read a text file
+        read_file(file_path="D:/projects/readme.md")
+        
+        # Read a Python file
+        read_file(file_path="D:/projects/app.py")
+        
+        # Windows path format
+        read_file(file_path="D:\\projects\\config.json")
     """
     # Normalize the path to handle both Windows and Unix style separators
     normalized_file = normalize_path(file_path)
@@ -588,6 +741,16 @@ def list_resources(directory: Optional[str] = None, report_progress: bool = True
     Returns:
         If report_progress is False: List of all resource objects
         If report_progress is True: Dict with contents, progress_info, total_items, processing_time
+    
+    Example:
+        # List all resources in all allowed directories
+        list_resources(directory=None, report_progress=True, batch_size=100)
+        
+        # List resources in specific directory
+        list_resources(directory="D:/projects/myapp", report_progress=True)
+        
+        # Get simple list without progress
+        list_resources(directory="D:/projects", report_progress=False)
     """
     import time
     start_time = time.time()
@@ -689,6 +852,16 @@ def get_resource(path: str) -> Dict[str, Any]:
     """
     Get metadata and actions for a specific file or directory at the given path.
     Returns a resource object or an error if not found or not allowed.
+    
+    Example:
+        # Get metadata for a file
+        get_resource(path="D:/projects/app.py")
+        
+        # Get metadata for a directory
+        get_resource(path="D:/projects/myapp")
+        
+        # Windows path format
+        get_resource(path="D:\\projects\\readme.md")
     """
     normalized_path = normalize_path(path)
     if not is_allowed_path(normalized_path):
@@ -735,6 +908,16 @@ def read_file_binary(file_path: str) -> Dict[str, Any]:
     """
     Read the content of a file as base64-encoded bytes.
     Returns a dict with 'content_base64' (base64 string) or an error.
+    
+    Example:
+        # Read an image file as base64
+        read_file_binary(file_path="D:/projects/logo.png")
+        
+        # Read any binary file
+        read_file_binary(file_path="D:/projects/document.pdf")
+        
+        # Windows path format
+        read_file_binary(file_path="D:\\projects\\image.jpg")
     """
     normalized_file = normalize_path(file_path)
     if not is_allowed_path(normalized_file):
@@ -792,14 +975,69 @@ def print_connection_info():
     print("2. For Visual Studio 2022 debugging: Uses config.json fallback")
     print("3. Available tools:")
     print("   - init(directory, file_path)")
-    print("   - list_directory(directory, report_progress=False, batch_size=100)")
+    print("   - list_directory(directory, report_progress=True, batch_size=100)")
+    print("   - list_directory_index(directory, index=0, index_size=10)")
     print("   - read_file(file_path)")
     print("   - read_file_binary(file_path)")
-    print("   - list_resources()")
+    print("   - list_resources(directory, report_progress=True, batch_size=100)")
     print("   - get_resource(path)")
+    print("   - get_tool_operations_guide()")
     print("4. Use --help-mcp for more configuration examples")
     print("5. Path formats: Both D:/path and D:\\path work automatically")
     print("="*60)
+
+@mcp.tool()
+def get_tool_operations_guide() -> Dict[str, Any]:
+    """
+    Get comprehensive operational documentation for all filesystem MCP tools.
+    
+    Returns detailed information about:
+    - Tool parameters and usage
+    - Performance characteristics
+    - Best practices and recommendations
+    - Tested results and comparisons
+    - Common pitfalls and warnings
+    
+    Returns:
+        Dictionary with formatted guide content and metadata
+    
+    Example:
+        # Get the complete operations guide
+        get_tool_operations_guide()
+        
+        # The guide includes detailed documentation for all 8 tools
+        # with usage examples, performance benchmarks, and best practices
+    """
+    # Get the directory where app.py is located
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    guide_path = os.path.join(script_dir, "TOOL_OPERATIONS.md")
+    
+    try:
+        with open(guide_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        return {
+            "success": True,
+            "guide_content": content,
+            "format": "markdown",
+            "file_path": guide_path,
+            "size_bytes": len(content.encode('utf-8')),
+            "lines": content.count('\n') + 1,
+            "note": "This is comprehensive documentation for all MCP filesystem tools. Read this to understand tool parameters, performance, best practices, and warnings."
+        }
+    except FileNotFoundError:
+        return {
+            "success": False,
+            "error": "TOOL_OPERATIONS.md not found",
+            "file_path": guide_path,
+            "suggestion": "The operations guide file is missing. Use read_file to check if it exists."
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Error reading operations guide: {str(e)}",
+            "file_path": guide_path
+        }
 
 def main():
     """Main entry point for the server."""
